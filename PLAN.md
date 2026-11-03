@@ -1,0 +1,102 @@
+# Build Plan
+
+Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for the idea and architecture). One new technology per stage. Each stage has a deliverable and a "done when" check. If a stage stalls for more than a few sessions, use the fallback and move on.
+
+**Decision (Option A):** Python keeps the working recorder and downloader for capture. The reducer, normalizer and replay engine are built in C# against the sessions already captured. Ingestion is ported to C# last, so the whole data path ends up in one language.
+
+## Stage 0: Housekeeping
+
+- [ ] Back up the five captured session files and the archive folders outside the project folder. Live sessions cannot be re-recorded.
+- [ ] Download the P3, Qualifying and Race archives once `ArchiveStatus` is `Complete`.
+- [ ] Create the repo with a `.gitignore` that excludes `credentials.json`, `.venv`, raw captures and archive folders.
+- [ ] Start a learning log (3 lines per stage: what I learned, what I would do differently).
+
+**Done when:** data is backed up, nothing sensitive is tracked by git.
+
+## Stage 1: C# reducer and decoders
+
+**Build**
+- Delta reducer: deep-merge, `_deleted` handling, numeric-key updates to lists, first-message-as-base when the snapshot is empty.
+- `CarData.z` / `Position.z` decoders (base64, raw deflate, UTF-8 BOM).
+- Session clock from `Utc` fields.
+
+**Learn:** C# basics, records, `System.Text.Json`, xUnit.
+
+**Test fixtures:** the captured sessions, including the empty-snapshot case (Practice 3), the red flag (Qualifying), and VSC / Safety Car / red flag (Race).
+
+**Done when:** the reducer's final state matches the archive's for every session (the Python comparison script is the reference), and tests cover `_deleted`, empty snapshots and the red-flag pause.
+
+## Stage 2: Normalizer and replay engine (C#)
+
+**Build**
+- Verify the car-data channel meanings against known values, then fix units.
+- Channel-sample schema: `session_time, car, channel, value, unit`, written to Parquet.
+- Live-file adapter and archive adapter feeding one reducer.
+- Replay engine: original timing, speed factor, pauses through red flags, scrub.
+
+**Learn:** async streams / `IAsyncEnumerable`, Parquet.Net.
+
+**Done when:** replaying the Race at 60x produces a plausible leaderboard and the live and archive paths give the same output.
+
+## Stage 3: Analysis exploration (Python notebooks)
+
+**Build:** lap table, stint table, distance-aligned lap comparison with delta line, sector bests, first session brief.
+
+**Learn:** DuckDB over Parquet.
+
+**Done when:** two Qualifying laps can be compared and the brief names the biggest time loss. Later, move the settled analysis into the C# data path.
+
+## Stage 4: Frontend basics
+
+1. TypeScript fundamentals, away from React.
+2. React with Vite (Next.js only if a real need appears).
+3. Load one precomputed chunk, draw a speed trace with Plotly.js, add play and scrub.
+4. Generate TypeScript types from the C# models for the schema boundary.
+
+**Done when:** the browser replays the Qualifying lap from Stage 3.
+
+## Stage 5: First usable product and deploy
+
+**Build:** session picker, lap comparison panel, session brief, jump-to-event navigation. Deploy static files to Vercel.
+
+**Before publishing:** read F1's current terms, decide what derived data is safe to host, and credit sources.
+
+**Done when:** someone else can open the link and compare two laps.
+
+## Stage 6: Strategy
+
+**Build:** fuel-corrected tyre degradation, pit windows, undercut detection, Safety Car / VSC / red-flag handling, then strategist mode and backtesting.
+
+**Done when:** the model reproduces the stops in the Mexico race and I can state one validated result.
+
+## Stage 7: BoxBoxBot panel
+
+**Build:** port the agent logic to TypeScript (Anthropic SDK browser mode, Zod tools, `toolRunner`), BYOK settings screen, and the key-handling safeguards from `PROJECT_IDEA.md`.
+
+**Check first:** the SDK docs for current browser-mode behavior.
+
+**Done when:** it answers "who had the best long-run pace?" from the precomputed data.
+
+## Stage 8: C# SignalR replay hub
+
+**Build:** ASP.NET Core SignalR hub streaming the replay to the browser locally.
+
+**Done when:** the frontend can switch between client-side playback and the hub.
+
+## Stage 9: Port ingestion to C#
+
+**Build:** the sign-in flow (config scrape, PKCE, `pi.flow`, subscription-token claim, token cache), the live SignalR client with the negotiate cookie, and the archive downloader.
+
+**Reference:** `f1_client.py` and FastF1.
+
+**Done when:** the C# recorder captures a full session that matches a Python capture of the same session. Then retire the Python recorder. Fallback: keep the Python recorder.
+
+## Stage 10: Live mode polish
+
+Demo-ready local live mode and a short demo video.
+
+## Working habits
+
+- Keep ingestion behind an adapter, since F1's endpoints can change.
+- Use real captured data as test fixtures; do not commit raw data.
+- Prefer the simplest option when a new technology blocks progress.

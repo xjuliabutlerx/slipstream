@@ -1,0 +1,51 @@
+# Secrets: never commit these
+credentials.json
+.env
+.env.*
+*.pem
+f1auth_token.json
+token.json
+
+# F1 data: raw captures and archive downloads (not for redistribution)
+*.jsonl
+*_raw/
+raw_live*
+data/
+captures/
+archive/
+*.jsonStream
+*.ff1pkl
+
+# Derived data (regenerate locally; see PROJECT_IDEA.md on redistribution)
+*.parquet
+*.duckdb
+*.duckdb.wal
+chunks/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# .NET / C#
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+
+# Node / frontend
+node_modules/
+dist/
+.next/
+.vercel/
+*.tsbuildinfo
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
