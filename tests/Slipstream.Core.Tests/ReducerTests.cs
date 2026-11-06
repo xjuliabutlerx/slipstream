@@ -135,4 +135,5 @@ public class ReducerTests
 
         Assert.Equal(expected.ToJsonString(), result.ToJsonString());
     }
+
 }

@@ -82,4 +82,5 @@ public class SessionReducerTests
         var state = reducer.GetState("PitTiming");
         Assert.Equal(expected.ToJsonString(), state!.ToJsonString());
     }
+
 }

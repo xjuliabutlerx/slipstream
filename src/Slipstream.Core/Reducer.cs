@@ -39,7 +39,10 @@ public static class Reducer
                 {
                     foreach (var k in keysToRemove)
                     {
-                        stateObj.Remove((string?) k);
+                        if ((string?) k is string name)
+                        {
+                            stateObj.Remove(name);
+                        }
                     }
                 }
                 else if (stateObj[key] is JsonObject or JsonArray && deltaValue is JsonObject)

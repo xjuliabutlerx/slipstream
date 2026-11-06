@@ -16,4 +16,5 @@ public class SessionReducer
     {
         return _states.GetValueOrDefault(topic);
     }
+
 }

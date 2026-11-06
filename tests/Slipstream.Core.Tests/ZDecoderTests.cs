@@ -32,4 +32,5 @@ public class ZDecoderTests
         Assert.Equal(-200, (int?) entry["Entries"]!["1"]!["Y"]);
         Assert.Equal(50, (int?) entry["Entries"]!["1"]!["Z"]);
     }
+
 }
