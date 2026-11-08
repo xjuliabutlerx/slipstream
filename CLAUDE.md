@@ -6,8 +6,8 @@ The folder may still be named `new-f1-project`; the user plans to rename it to `
 
 ## About the user
 
-- Learning most of this stack as they build. Comfortable with Python; new to C#, TypeScript, React at scale, Parquet/DuckDB, Vercel, and the Anthropic TypeScript SDK.
-- Wants step-by-step plans, one new technology at a time, with clear "done when" checks.
+- Learning most of this stack as they build. Comfortable with Python; new to C#, TypeScript, React at scale, Parquet/DuckDB, Vercel, and the Anthropic TypeScript SDK. Also uses Java day to day: map new C#/TS concepts to Java and Python equivalents (JUnit, Jackson, Maven, pytest) and call out where they differ.
+- Wants step-by-step plans, one new technology at a time, with clear "done when" checks. Prefers to write the code themselves from hints; work test-first (red, then green), and ask of each test "what wrong implementation would still pass this?".
 - Use they/them for the user.
 
 ## Decisions made
@@ -28,8 +28,22 @@ The folder may still be named `new-f1-project`; the user plans to rename it to `
 - Needs env vars `F1_USERNAME` and `F1_PASSWORD` (F1 account with an active F1TV subscription). **Never read or print `credentials.json` or the token cache.**
 - Captures (raw live, JSONL): `mexico_fp1_data.jsonl` (started 15 min late), `mexico_fp2_data.jsonl` (post-session snapshot only), `mexico_fp3_data.jsonl`, `mexico_qualifying_data.jsonl`, `mexico_race_data.jsonl`.
 - Archive downloads: `fp1_raw/`, `fp2_raw/`, `fp3_raw/`, `qualifying_raw/`, `race_raw/`.
-- `.gitignore` excludes secrets, all raw data/archives and derived Parquet/DuckDB. Not yet a git repo.
-- Do not commit or redistribute raw F1 data.
+- `.gitignore` excludes secrets, all raw data/archives, derived Parquet/DuckDB, and `data/` (generated comparison output). Git repo with remote `origin` (`xjuliabutlerx/slipstream` on GitHub).
+- Do not commit or redistribute raw F1 data. Tests use synthetic payloads, never real captured lines.
+
+**C# solution (`Slipstream.slnx`, .NET 10, xUnit):**
+- `src/Slipstream.Core/` (class library):
+  - `ZDecoder`: `.z` payload (base64, raw deflate via `DeflateStream`, UTF-8 JSON) to `JsonNode`.
+  - `Reducer.Apply(state, delta)`: delta merge; mutates objects in place, returns the result. Rules: deep-merge objects; `_deleted` removes sibling keys; `_kf` is never stored; a dict delta on a list is `{"<index>": item_delta}` (index == Count appends, beyond that throws `InvalidDataException`); new keys are built by merging into an empty object so the rules apply to first messages too.
+  - `SessionReducer`: state per topic. `Feed(topic, payload)`; a payload with `_kf: true` is a keyframe and **replaces** the topic's state instead of merging. `GetState` returns the live object.
+  - `TimestampParser`: `Parse` (archive offset `[D.]HH:MM:SS.mmm` to `TimeSpan`) and `ParseUtc` (absolute `Utc`, 6 or 7 fraction digits).
+  - `ArchiveLineParser` / `ArchiveReader`: archive `.jsonStream` lines and files (lazy `IEnumerable`).
+  - `LiveReader`: `ParseLine` (one captured line to messages; usable for a socket later) and `ReadFile` (JSONL capture). A snapshot yields one message per topic with null `Utc`; `.z` payloads pass through as strings.
+  - `FeedMessage`, `ArchiveLine`, `SessionClock` (records). `SessionClock` is built but not yet used by anything.
+- `src/Slipstream.Cli/`: `dotnet run --project src/Slipstream.Cli -c Release -- <archive|live> <input> <outDir>` writes each topic's final state as JSON (skips `.z` topics).
+- `tests/Slipstream.Core.Tests/`: xUnit tests (37 at last count); run with `dotnet test`.
+- `tools/reference_state.py <archive_dir> <out_dir>`: independent Python reducer, the reference answer. `tools/compare_states.py <ref_dir> <other_dir>`: compares per-topic state as parsed JSON and reports the first difference per topic.
+- Typical check: `python3 -I tools/reference_state.py race_raw data/reference/race`, then the CLI in `archive` mode to `data/csharp/race`, then compare. `live` mode output goes to `data/csharp-live/<session>`.
 
 ## How the F1 endpoints work
 
@@ -45,15 +59,18 @@ The folder may still be named `new-f1-project`; the user plans to rename it to `
 - `.z` topics (`CarData.z`, `Position.z`): payload is a JSON-quoted base64 string; decode with `zlib.decompress(base64.b64decode(s), -zlib.MAX_WBITS)` then UTF-8-sig JSON. Live and archive match.
   - `CarData.z`: `{"Entries":[{"Utc","Cars":{"<num>":{"Channels":{...}}}}]}`. Only channels `0,2,3,4,5` appear (look like RPM, speed km/h, gear, throttle, brake; **meanings not verified**). **No DRS channel.**
   - `Position.z`: `{"Position":[{"Timestamp","Entries":{"<num>":{"Status","X","Y","Z"}}}]}`. `Status` was always `OnTrack`. Units unknown.
-- Plain topics are **deltas**: deep-merge into state. Also handle `"_deleted": [...]` (remove keys) and numeric-key dicts updating lists by index. Merging archive deltas reproduced the live snapshot for 21 of 27 feeds in Practice 2. `_kf: true` appears on full-state messages of small topics.
-- **Snapshot is unreliable:** empty in Practice 3, missing pit data in Practice 2. Treat the first message per topic as base state.
+- Plain topics are **deltas**: deep-merge into state. Also handle `"_deleted": [...]` (remove keys) and numeric-key dicts updating lists by index (e.g. `TimingAppData` `Stints`: state is a list, delta is `{"0": {...}}`; a delta list or scalar replaces). Merging archive deltas reproduced the live snapshot for 21 of 27 feeds in Practice 2.
+- **`_kf: true` marks a keyframe**: a complete state for that topic, not a delta. It appears in live snapshots and in live feed lines (mid-stream, repeatedly on small topics: `Heartbeat`, `WeatherData`, `TlaRcm`, `SessionStatus`, `TrackStatus`, ...). The archive never contains `_kf`. Handling: never store the key; a keyframe replaces the topic's state. Checked on the live captures: replace-on-keyframe changes nothing in the Race, Qualifying or FP1, and in FP3 it fixes `PitLaneTimeCollection` (merge left stale cars 11 and 5; the archive and replace both give an empty `PitTimes`). One topic in one session, so keep watching for a topic moving away from the archive.
+- **Snapshot is unreliable:** empty in Practice 3, missing pit data in Practice 2. Treat the first message per topic as base state (merge the first message into `{}`). FP2's capture is two snapshots taken the next day (its `Heartbeat` is Oct 31 for an Oct 30 session), so it cannot be compared with its archive.
+- Live JSONL line shapes: `{"kind":"snapshot","result":{topic:state,...},...}` (one per file; two in FP2; `result` is `{}` in FP3) and `{"kind":"feed","data":[topic,payload,utc],"t_recv":...}`. `.z` topics have a base64 string payload. No other kinds, no snapshot errors.
 - Values are mostly strings (lap times, positions, weather, car numbers). `New` is a string in stint feeds but a boolean in `CurrentTyres`. Empty string means no value yet.
-- Live messages carry absolute UTC; build the session clock from `Utc` fields.
+- Live messages carry absolute UTC; build the session clock from `Utc` fields. In the archive, line offsets are noisy (about 100 ms jitter against the `Utc` inside `Heartbeat`) and **freeze at the end of the race file** (`1.05:12:29.107` repeated while `Utc` keeps advancing). Prefer `Utc` over offsets. `Utc` has 6 or 7 fraction digits.
+- `SessionStatus` is not a safe clock anchor: `Started` occurs several times (Qualifying 4, Race 3 with an `Aborted` between the last two, FP3 once), a late capture may never see one (FP1), archive status lines carry no `Utc`, and the race archive begins with a stale `Started` about 26 h before the race (leftover Saturday data). `SessionData.StatusSeries` carries a `Utc` per status change and may be a better source. `ExtrapolatedClock` (`Utc`, `Remaining`, `Extrapolating`) is the broadcast session timer.
 - Practice 3's first ~14 min had `SessionInfo` describing the Sunday race (F1-side glitch); `TopThree`/`LapSeries` were absent until it corrected.
 - Qualifying: one stream, parts shown via `SessionStatus` cycles, `RaceControlMessages` ("Q2 WILL START AT ..."), top-level `SessionPart`/`CutOffTime` in `TimingData`, per-driver `KnockedOut`/`Cutoff`/`Stats`/`BestLapTimes`. Had a red flag and restart.
 - Race: 71 laps; VSC, three Safety Car periods, a red flag (~39 min stoppage). `LapCount` (`{"CurrentLap","TotalLaps"}`) is race-only.
-- Race-only archive feeds missed in the live captures: `OvertakeSeries`, `PitStop`, `PitStopSeries` (now in `TOPICS`; not yet confirmed subscribable live). `PitStop` rows can lack `Lap`.
-- `TimingDataF1` is byte-identical to `TimingData` in the archive; live is near-identical. Can be dropped.
+- Race-only archive feeds missed in the live captures: `OvertakeSeries`, `PitStop`, `PitStopSeries` (now in `TOPICS`; not yet confirmed subscribable live). `PitStop` rows can lack `Lap`. Two more race archive feeds are not in `TOPICS` and not in any live capture: `ChampionshipPrediction`, `DriverRaceInfo` (28,978 messages in the race).
+- `TimingDataF1` and `TimingData` have equal final state in the FP3, Qualifying and Race archives, but the race archive has different message counts (68,291 against 39,317), so they are not byte-identical there. Can still be dropped. `TimingDataF1` is absent from the live Race, Qualifying and FP1 captures.
 - `TeamRadio` carries only metadata and `.mp3` paths, only for selected clips (28 in the race, 8 cars, none for car 63). Audio content is not in the feed.
 - Rough size: about 10 MB/hour of live capture; the race file is 39 MB.
 
@@ -69,12 +86,17 @@ Topics seen live: Heartbeat, DriverList, ExtrapolatedClock, RaceControlMessages,
 
 ## Status
 
-Stage 0 of `PLAN.md` in progress: archives downloaded, `.gitignore` written, `requirements.txt` made. Remaining: back up captures and archives, rename folder, `git init`, create the GitHub repo (description drafted), start the learning log. Next: Stage 1, the C# reducer and decoders, tested against the captured sessions (empty snapshot in FP3, red flag in Qualifying, VSC/SC/red flag in the Race) and checked against the archives.
+Stage 0 mostly done: archives downloaded, repo created with `.gitignore`, `requirements.txt` made. Remaining there (user to confirm): back up captures and archives, start the learning log.
+
+Stage 1 done (C# reducer, decoders, readers, CLI, Python reference). Archive path: the C# final state equals the Python reference for every topic in all five sessions. Live path vs archive, with `_kf` handled: FP3 22/25, Qualifying 21/25, Race 23/31, FP1 11/25, FP2 not comparable. Every remaining difference is outside the reducer: the live capture ended before the archive (`Heartbeat`, last `SessionStatus` `Finalised` vs `Ends`, one fewer `StatusSeries` entry), `ArchiveStatus` was `Generating` at capture time, topics the recorder never subscribed to, and FP1's late start with a shorter topic list. The red-flag **pause** is a replay-engine concern (Stage 2), not a reducer one. Not yet used: `ZDecoder` and `SessionClock`.
+
+Next: Stage 2 (verify car-data channel meanings, normalizer to Parquet, replay engine with `IAsyncEnumerable`).
 
 ## Open questions
 
 - Verify car-data channel meanings and `Position` units.
 - Confirm whether the static archive needs the Bearer token.
-- Confirm the three race-only feeds are subscribable live.
+- Confirm the five archive-only race feeds are subscribable live (`OvertakeSeries`, `PitStop`, `PitStopSeries`, `ChampionshipPrediction`, `DriverRaceInfo`), and whether `TimingDataF1` is worth subscribing to at all.
+- Which `SessionClock` anchor to use in the replay engine (first `Utc` is the working choice; `StatusSeries` for session events).
 - Read F1's current terms before publishing; hosting derived chunks on a public CDN may count as redistribution.
 - Name availability for "Slipstream".
