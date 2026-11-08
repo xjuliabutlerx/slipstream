@@ -35,6 +35,8 @@ public static class Reducer
         {
             foreach (var (key, deltaValue) in deltaObj)
             {
+                if (key == "_kf") continue;
+
                 if (key == "_deleted" && deltaValue is JsonArray keysToRemove)
                 {
                     foreach (var k in keysToRemove)
