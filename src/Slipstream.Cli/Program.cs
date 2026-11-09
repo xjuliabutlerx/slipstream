@@ -16,8 +16,20 @@ if (mode == "archive")
 {
     foreach (var path in Directory.GetFiles(input, "*.jsonStream").Order())
     {
-        // ...your existing loop body, with the write replaced by:
-        // if (reducer.GetState(topic) is { } state) WriteState(topic, state);
+        var topic = Path.GetFileName(path)[..^".jsonStream".Length];
+        if (topic.EndsWith(".z")) continue;
+
+        var reducer = new SessionReducer();   // one per topic keeps memory small
+        var count = 0;
+
+        foreach (var line in ArchiveReader.ReadTopic(path))
+        {
+            reducer.Feed(topic, line.Payload);
+            count++;
+        }
+
+        if (reducer.GetState(topic) is { } state) WriteState(topic, state);
+        Console.WriteLine($"{topic,-28} {count,7} messages");
     }
 }
 else if (mode == "live")
@@ -37,6 +49,12 @@ else if (mode == "live")
         if (reducer.GetState(topic) is { } state) WriteState(topic, state);
         Console.WriteLine($"{topic,-28} {counts[topic],7} messages");
     }
+}
+else if (mode == "carData")
+{
+    var clock = new SessionClock(TimestampParser.ParseUtc("2026-10-31T17:32:49.3647304Z"));
+    foreach (var s in CarDataFile.Read(input, clock))
+        Console.WriteLine(s);
 }
 else
 {
