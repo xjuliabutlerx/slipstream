@@ -26,19 +26,22 @@ Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for
 
 **Done when:** the reducer's final state matches the archive's for every session (the Python comparison script is the reference), and tests cover `_deleted`, empty snapshots and keyframes. The red-flag pause moved to Stage 2, since only the replay engine has a notion of time.
 
-**Status: done.** Archive path: C# equals the Python reference for every topic in all five sessions. Live path vs archive: every remaining difference is a capture gap, not a reducer bug (see `CLAUDE.md` Status). Added beyond the original scope: `_kf` keyframe handling (found by the live comparison), an archive reader, a live reader, a CLI, and the Python reference and compare scripts in `tools/`. Built but unused until Stage 2: `ZDecoder`, `SessionClock`.
+**Status: done.** Archive path: C# equals the Python reference for every topic in all five sessions. Live path vs archive: every remaining difference is a capture gap, not a reducer bug (see `CLAUDE.md` Status). Added beyond the original scope: `_kf` keyframe handling (found by the live comparison), an archive reader, a live reader, a CLI, and the Python reference and compare scripts in `tools/`. `ZDecoder` and `SessionClock` were built here and are now used by Stage 2.
 
 ## Stage 2: Normalizer and replay engine (C#)
 
 **Build**
-- Verify the car-data channel meanings against known values, then fix units.
+- Verify the car-data channel meanings against known values, then fix units. (Done; a FastF1 one-lap cross-check is still open.)
+- Session clock from `SessionInfo` (scheduled `StartDate` + `GmtOffset`) and a time window around the session that drops stale data. (Done.)
 - Channel-sample schema: `session_time, car, channel, value, unit`, written to Parquet.
 - Live-file adapter and archive adapter feeding one reducer.
-- Replay engine: original timing, speed factor, pauses through red flags, scrub.
+- Replay engine: original timing, speed factor, scrub. Skips dead time (gaps with no samples). Red flags (`Aborted` to `Started`) show a brief "red flag" pause and then auto-skip to the restart, with the clock showing real elapsed time.
 
 **Learn:** async streams / `IAsyncEnumerable`, Parquet.Net.
 
-**Done when:** replaying the Race at 60x produces a plausible leaderboard, the live and archive paths give the same output, and the replay pauses through the red flag (`SessionStatus` `Aborted` to `Started`).
+**Done when:** replaying the Race at 60x produces a plausible leaderboard, the live and archive paths give the same output, and the replay shows the red flag as a brief pause and then skips to the restart (`SessionStatus` `Aborted` to `Started`).
+
+**Status: in progress.** Done: channel meanings, `ChannelSample` + `CarDataNormalizer` + `CarDataFile`, `SessionInfo`-based clock and window, and the filter. Race check: 4,788,190 of 5,049,880 samples kept, from -00:48:55 to 02:28:39.9. Next: Parquet.
 
 ## Stage 3: Analysis exploration (Python notebooks)
 
@@ -87,7 +90,7 @@ Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for
 
 ## Stage 9: Port ingestion to C#
 
-**Build:** the sign-in flow (config scrape, PKCE, `pi.flow`, subscription-token claim, token cache), the live SignalR client with the negotiate cookie, and the archive downloader.
+**Build:** the sign-in flow (config scrape, PKCE, `pi.flow`, subscription-token claim, token cache), the live SignalR client with the negotiate cookie, and the archive downloader. Add a race-calendar client: FastF1's `f1timing` backend reads the season `Index.json` at `/static/{year}/` (per meeting: `Name`, `Location`, `Country`, `Number`, `Sessions[]` with `Name`, `StartDate`, `GmtOffset`, `Path`). Use it to build archive paths (no hand-built race-day dates) and to decide when to stream live.
 
 **Reference:** `f1_client.py` and FastF1.
 
