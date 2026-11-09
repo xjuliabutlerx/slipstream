@@ -52,9 +52,26 @@ else if (mode == "live")
 }
 else if (mode == "carData")
 {
-    var clock = new SessionClock(TimestampParser.ParseUtc("2026-10-31T17:32:49.3647304Z"));
-    foreach (var s in CarDataFile.Read(input, clock))
-        Console.WriteLine(s);
+    // 1. Reduce SessionInfo.jsonStream to its final state.
+    var reducer = new SessionReducer();
+    foreach (var line in ArchiveReader.ReadTopic(Path.Combine(input, "SessionInfo.jsonStream")))
+        reducer.Feed("SessionInfo", line.Payload);
+    var info = reducer.GetState("SessionInfo")!;
+
+    // 2. Clock and window from it.
+    var clock = SessionWindow.ClockFrom(info);
+    var (fromUtc, toUtc) = SessionWindow.WindowFrom(info, TimeSpan.FromMinutes(90), TimeSpan.FromMinutes(30));
+    var from = fromUtc - clock.StartUtc;
+    var to   = toUtc   - clock.StartUtc;
+
+    // 3. Read the car data, filter, and report.
+    var samples = SampleWindow.Within(CarDataFile.Read(Path.Combine(input, "CarData.z.jsonStream"), clock), from, to);
+
+    List<ChannelSample> sampleList = samples.ToList();
+    
+    Console.WriteLine($"Found {sampleList.Count} samples.");
+    Console.WriteLine($"First Sample: {sampleList[0]}");
+    Console.WriteLine($"Last Sample: {sampleList[sampleList.Count - 1]}");
 }
 else
 {
