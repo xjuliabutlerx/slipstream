@@ -6,9 +6,9 @@ Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for
 
 ## Stage 0: Housekeeping
 
-- [ ] Back up the five captured session files and the archive folders outside the project folder. Live sessions cannot be re-recorded.
-- [ ] Download the P3, Qualifying and Race archives once `ArchiveStatus` is `Complete`.
-- [ ] Create the repo with a `.gitignore` that excludes `credentials.json`, `.venv`, raw captures and archive folders.
+- [x] Back up the five captured session files and the archive folders outside the project folder. Live sessions cannot be re-recorded.
+- [x] Download the P3, Qualifying and Race archives once `ArchiveStatus` is `Complete`.
+- [x] Create the repo with a `.gitignore` that excludes `credentials.json`, `.venv`, raw captures and archive folders.
 - [ ] Start a learning log (3 lines per stage: what I learned, what I would do differently).
 
 **Done when:** data is backed up, nothing sensitive is tracked by git.
@@ -24,7 +24,9 @@ Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for
 
 **Test fixtures:** the captured sessions, including the empty-snapshot case (Practice 3), the red flag (Qualifying), and VSC / Safety Car / red flag (Race).
 
-**Done when:** the reducer's final state matches the archive's for every session (the Python comparison script is the reference), and tests cover `_deleted`, empty snapshots and the red-flag pause.
+**Done when:** the reducer's final state matches the archive's for every session (the Python comparison script is the reference), and tests cover `_deleted`, empty snapshots and keyframes. The red-flag pause moved to Stage 2, since only the replay engine has a notion of time.
+
+**Status: done.** Archive path: C# equals the Python reference for every topic in all five sessions. Live path vs archive: every remaining difference is a capture gap, not a reducer bug (see `CLAUDE.md` Status). Added beyond the original scope: `_kf` keyframe handling (found by the live comparison), an archive reader, a live reader, a CLI, and the Python reference and compare scripts in `tools/`. Built but unused until Stage 2: `ZDecoder`, `SessionClock`.
 
 ## Stage 2: Normalizer and replay engine (C#)
 
@@ -36,7 +38,7 @@ Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for
 
 **Learn:** async streams / `IAsyncEnumerable`, Parquet.Net.
 
-**Done when:** replaying the Race at 60x produces a plausible leaderboard and the live and archive paths give the same output.
+**Done when:** replaying the Race at 60x produces a plausible leaderboard, the live and archive paths give the same output, and the replay pauses through the red flag (`SessionStatus` `Aborted` to `Started`).
 
 ## Stage 3: Analysis exploration (Python notebooks)
 

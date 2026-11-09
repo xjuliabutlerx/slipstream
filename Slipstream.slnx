@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Slipstream.Cli/Slipstream.Cli.csproj" />
+    <Project Path="src/Slipstream.Core/Slipstream.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Slipstream.Core.Tests/Slipstream.Core.Tests.csproj" />
+  </Folder>
+</Solution>
