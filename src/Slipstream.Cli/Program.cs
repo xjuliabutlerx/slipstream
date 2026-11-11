@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Slipstream.Core;
 
@@ -67,15 +68,24 @@ else if (mode == "carData")
     // 3. Read the car data, filter, and report.
     var samples = SampleWindow.Within(CarDataFile.Read(Path.Combine(input, "CarData.z.jsonStream"), clock), from, to);
 
-    List<ChannelSample> sampleList = samples.ToList();
-    
-    Console.WriteLine($"Found {sampleList.Count} samples.");
-    Console.WriteLine($"First Sample: {sampleList[0]}");
-    Console.WriteLine($"Last Sample: {sampleList[sampleList.Count - 1]}");
+    // 4. Write the car data into parquet files.
+    var path = Path.Combine(outDir, "cardata.parquet");
+    Stopwatch stopwatch = Stopwatch.StartNew();
+
+    await ParquetSamples.WriteAsync(path, samples);
+
+    TimeSpan ts = stopwatch.Elapsed;
+    double writeSeconds = ts.TotalSeconds;
+
+    // var readBack = await ParquetSamples.ReadAsync(path);
+
+    Console.WriteLine($"Time Elapsed: {writeSeconds:F1} seconds");
+    // Console.WriteLine($"Rows read back: {readBack.Count}");
+    Console.WriteLine($"File Size: {new FileInfo(path).Length / 1_000_000.0:F1} MB");
 }
 else
 {
-    Console.Error.WriteLine("Usage: <archive|live> <input> <outDir>");
+    Console.Error.WriteLine("Usage: <archive|live|cardata> <input> <outDir>");
     return 1;
 }
 
