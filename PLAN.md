@@ -33,7 +33,7 @@ Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for
 **Build**
 - Verify the car-data channel meanings against known values, then fix units. (Done; a FastF1 one-lap cross-check is still open.)
 - Session clock from `SessionInfo` (scheduled `StartDate` + `GmtOffset`) and a time window around the session that drops stale data. (Done.)
-- Channel-sample schema: `session_time, car, channel, value, unit`, written to Parquet.
+- Channel-sample schema: `session_time, car, channel, value, unit`, written to Parquet. (Done for `CarData.z`: `SessionSeconds` as a double; write in 100,000-row groups. `Position.z` is still to do.)
 - Live-file adapter and archive adapter feeding one reducer.
 - Replay engine: original timing, speed factor, scrub. Skips dead time (gaps with no samples). Red flags (`Aborted` to `Started`) show a brief "red flag" pause and then auto-skip to the restart, with the clock showing real elapsed time.
 
@@ -41,7 +41,7 @@ Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for
 
 **Done when:** replaying the Race at 60x produces a plausible leaderboard, the live and archive paths give the same output, and the replay shows the red flag as a brief pause and then skips to the restart (`SessionStatus` `Aborted` to `Started`).
 
-**Status: in progress.** Done: channel meanings, `ChannelSample` + `CarDataNormalizer` + `CarDataFile`, `SessionInfo`-based clock and window, and the filter. Race check: 4,788,190 of 5,049,880 samples kept, from -00:48:55 to 02:28:39.9. Next: Parquet.
+**Status: in progress.** Done: channel meanings, `ChannelSample` + `CarDataNormalizer` + `CarDataFile`, `SessionInfo`-based clock and window, the filter, and the Parquet writer. Race check: 4,788,190 of 5,049,880 samples kept, from -00:48:55 to 02:28:39.9, written to a 14.1 MB Parquet file (about 3 s, about 150 MB peak memory with 100,000-row groups; the default row group size used 1.18 GB) and checked in DuckDB. Next: first DuckDB queries, `Position.z`, then the replay engine.
 
 ## Stage 3: Analysis exploration (Python notebooks)
 
