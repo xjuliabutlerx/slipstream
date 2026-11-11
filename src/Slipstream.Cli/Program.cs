@@ -13,6 +13,23 @@ var options = new JsonSerializerOptions { WriteIndented = true };
 void WriteState(string topic, JsonNode state) =>
     File.WriteAllText(Path.Combine(outDir, topic + ".json"), state.ToJsonString(options));
 
+(SessionClock Clock, TimeSpan From, TimeSpan To) LoadWindow(string archiveDir)
+{
+    // 1. Reduce SessionInfo.jsonStream to its final state.
+    var reducer = new SessionReducer();
+    foreach (var line in ArchiveReader.ReadTopic(Path.Combine(input, "SessionInfo.jsonStream")))
+        reducer.Feed("SessionInfo", line.Payload);
+    var info = reducer.GetState("SessionInfo")!;
+
+    // 2. Clock and window from it.
+    var clock = SessionWindow.ClockFrom(info);
+    var (fromUtc, toUtc) = SessionWindow.WindowFrom(info, TimeSpan.FromMinutes(90), TimeSpan.FromMinutes(30));
+    var from = fromUtc - clock.StartUtc;
+    var to   = toUtc   - clock.StartUtc;
+
+    return (clock, from, to);
+}
+
 if (mode == "archive")
 {
     foreach (var path in Directory.GetFiles(input, "*.jsonStream").Order())
@@ -53,39 +70,46 @@ else if (mode == "live")
 }
 else if (mode == "carData")
 {
-    // 1. Reduce SessionInfo.jsonStream to its final state.
-    var reducer = new SessionReducer();
-    foreach (var line in ArchiveReader.ReadTopic(Path.Combine(input, "SessionInfo.jsonStream")))
-        reducer.Feed("SessionInfo", line.Payload);
-    var info = reducer.GetState("SessionInfo")!;
+    var (clock, from, to) = LoadWindow(input);
 
-    // 2. Clock and window from it.
-    var clock = SessionWindow.ClockFrom(info);
-    var (fromUtc, toUtc) = SessionWindow.WindowFrom(info, TimeSpan.FromMinutes(90), TimeSpan.FromMinutes(30));
-    var from = fromUtc - clock.StartUtc;
-    var to   = toUtc   - clock.StartUtc;
-
-    // 3. Read the car data, filter, and report.
+    // Read the car data, filter, and report.
     var samples = SampleWindow.Within(CarDataFile.Read(Path.Combine(input, "CarData.z.jsonStream"), clock), from, to);
 
-    // 4. Write the car data into parquet files.
+    // Write the car data into parquet files.
     var path = Path.Combine(outDir, "cardata.parquet");
     Stopwatch stopwatch = Stopwatch.StartNew();
 
-    await ParquetSamples.WriteAsync(path, samples);
+    await ParquetChannelSamples.WriteAsync(path, samples);
 
     TimeSpan ts = stopwatch.Elapsed;
     double writeSeconds = ts.TotalSeconds;
 
-    // var readBack = await ParquetSamples.ReadAsync(path);
+    // var readBack = await ParquetChannelSamples.ReadAsync(path);
 
     Console.WriteLine($"Time Elapsed: {writeSeconds:F1} seconds");
     // Console.WriteLine($"Rows read back: {readBack.Count}");
     Console.WriteLine($"File Size: {new FileInfo(path).Length / 1_000_000.0:F1} MB");
 }
+else if (mode == "positions")
+{
+    var (clock, from, to) = LoadWindow(input);
+
+    var samples = SampleWindow.Within(
+        PositionDataFile.Read(Path.Combine(input, "Position.z.jsonStream"), clock), from, to);
+
+    var path = Path.Combine(outDir, "position.parquet");
+    var stopwatch = Stopwatch.StartNew();
+
+    await ParquetPositionSamples.WriteAsync(path, samples);
+    var readBack = await ParquetChannelSamples.ReadAsync(path);
+
+    Console.WriteLine($"Time Elapsed: {stopwatch.Elapsed.TotalSeconds:F1} seconds");
+    Console.WriteLine($"Rows read back: {readBack.Count}");
+    Console.WriteLine($"File Size: {new FileInfo(path).Length / 1_000_000.0:F1} MB");
+}
 else
 {
-    Console.Error.WriteLine("Usage: <archive|live|cardata> <input> <outDir>");
+    Console.Error.WriteLine("Usage: <archive|live|cardata|positions> <input> <outDir>");
     return 1;
 }
 

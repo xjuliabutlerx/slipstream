@@ -1,6 +1,6 @@
 namespace Slipstream.Core.Tests;
 
-public class ParquetSamplesTests
+public class ParquetChannelSamplesTests
 {
     [Fact]
     public async Task WriteThenRead_RoundTripsEveryField()
@@ -15,8 +15,8 @@ public class ParquetSamplesTests
                 new(TimeSpan.FromSeconds(3600),  "63", "brake",  1,   "on/off"),
             };
 
-            await ParquetSamples.WriteAsync(path, samples);
-            var back = await ParquetSamples.ReadAsync(path);
+            await ParquetChannelSamples.WriteAsync(path, samples);
+            var back = await ParquetChannelSamples.ReadAsync(path);
 
             Assert.Equal(samples.Count, back.Count);
             for (var i = 0; i < samples.Count; i++)
@@ -45,8 +45,8 @@ public class ParquetSamplesTests
                 .Select(i => new ChannelSample(TimeSpan.FromSeconds(i), "44", "speed", i, "km/h"))
                 .ToList();
 
-            await ParquetSamples.WriteAsync(path, samples, rowGroupSize: 10);
-            var back = await ParquetSamples.ReadAsync(path);
+            await ParquetChannelSamples.WriteAsync(path, samples, rowGroupSize: 10);
+            var back = await ParquetChannelSamples.ReadAsync(path);
 
             Assert.Equal(25, back.Count);
             Assert.Equal(samples.Select(s => s.Value), back.Select(s => s.Value));

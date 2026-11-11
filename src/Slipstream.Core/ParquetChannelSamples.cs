@@ -3,7 +3,7 @@ using Parquet.Serialization;
 
 namespace Slipstream.Core;
 
-public static class ParquetSamples
+public static class ParquetChannelSamples
 {
     public static async Task WriteAsync(string path, IEnumerable<ChannelSample> samples, int rowGroupSize = 100_000)
     {

@@ -34,6 +34,11 @@ public static class TestData
     /// <summary>One archive line for a .z topic: offset, then the base64 payload as a JSON string.</summary>
     public static string ZArchiveLine(string offset, string json) =>
         $"{offset}\"{EncodeZ(json)}\"";
+
+    /// <summary>Decoded Position.z document with one entry and one car. Values are raw decimetres.</summary>
+    public static string PositionJson(string timestamp, string car, int x, int y, int z, string status = "OnTrack") =>
+        $"{{\"Position\":[{{\"Timestamp\":\"{timestamp}\",\"Entries\":{{\"{car}\":{{\"Status\":\"{status}\",\"X\":{x},\"Y\":{y},\"Z\":{z}}}}}}}]}}";
+
 }
 
 /// <summary>A temp file that is deleted when disposed (use with <c>using var</c>).</summary>

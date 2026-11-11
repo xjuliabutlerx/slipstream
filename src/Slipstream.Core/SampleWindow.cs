@@ -2,7 +2,7 @@ namespace Slipstream.Core;
 
 public static class SampleWindow
 {
-    public static IEnumerable<ChannelSample> Within(IEnumerable<ChannelSample> samples, TimeSpan from, TimeSpan to)
+    public static IEnumerable<T> Within<T>(IEnumerable<T> samples, TimeSpan from, TimeSpan to) where T : ISessionTimed
     {
         foreach (var sample in samples)
         {

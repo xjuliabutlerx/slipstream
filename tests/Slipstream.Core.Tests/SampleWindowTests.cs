@@ -3,22 +3,33 @@ namespace Slipstream.Core.Tests;
 public class SampleWindowTests
 {
     // Builds a sample at a given number of seconds. Only the time matters in these tests.
-    private static ChannelSample At(double seconds) =>
+    private static ChannelSample ChannelAt(double seconds) =>
         new(TimeSpan.FromSeconds(seconds), "44", "speed", 100, "km/h");
 
+    private static PositionSample PositionAt(double seconds) =>
+        new(TimeSpan.FromSeconds(seconds), "44", 100.0, -200.0, 300.0, "OnTrack");
+
+    private static readonly TimeSpan From = TimeSpan.FromSeconds(-10);
+    private static readonly TimeSpan To   = TimeSpan.FromSeconds(100);
+
     [Fact]
-    public void Within_KeepsSamplesInsideTheRangeIncludingBothEnds()
+    public void Within_KeepsChannelSamplesInsideTheRangeIncludingBothEnds()
     {
-        // Range: from -10 s to 100 s
-        var from = TimeSpan.FromSeconds(-10);
-        var to   = TimeSpan.FromSeconds(100);
+        var samples = new[] { ChannelAt(-50), ChannelAt(-10), ChannelAt(0), ChannelAt(100), ChannelAt(101) };
 
-        var samples = new[] { At(-50), At(-10), At(0), At(100), At(101) };
-
-        var kept = SampleWindow.Within(samples, from, to).ToList();
+        var kept = SampleWindow.Within(samples, From, To).ToList();
 
         // -50 is too early and 101 is too late. The other three stay.
-        var expectedTimes = new[] { -10.0, 0.0, 100.0 };
-        Assert.Equal(expectedTimes, kept.Select(s => s.SessionTime.TotalSeconds));
+        Assert.Equal(new[] { -10.0, 0.0, 100.0 }, kept.Select(s => s.SessionTime.TotalSeconds));
+    }
+
+    [Fact]
+    public void Within_KeepsPositionSamplesInsideTheRangeIncludingBothEnds()
+    {
+        var samples = new[] { PositionAt(-50), PositionAt(-10), PositionAt(0), PositionAt(100), PositionAt(101) };
+
+        var kept = SampleWindow.Within(samples, From, To).ToList();
+
+        Assert.Equal(new[] { -10.0, 0.0, 100.0 }, kept.Select(s => s.SessionTime.TotalSeconds));
     }
 }
