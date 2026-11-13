@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Time.Testing;
+
 namespace Slipstream.Core.Tests;
 
 public class ReplayEngineTests
@@ -73,5 +75,67 @@ public class ReplayEngineTests
         Assert.Equal(S(5), batch.To);
         Assert.Equal(new[] { 4.0, 5.0 }, batch.Channels.Select(s => s.SessionTime.TotalSeconds));
         Assert.Empty(batch.Positions);
+    }
+
+    [Fact]
+    public async Task RunAsync_YieldsOneBatchPerTimerTick()
+    {
+        var time = new FakeTimeProvider();
+        var channels = new[] { ChannelAt(1), ChannelAt(4), ChannelAt(7) };
+        var engine = new ReplayEngine(PlayingClock(), channels, Array.Empty<PositionSample>(), time);
+
+        await using var batches = engine.RunAsync(interval: S(1)).GetAsyncEnumerator();
+
+        // The iterator runs up to its first await when we call MoveNextAsync, so the
+        // timer exists before we move the fake time.
+        var next = batches.MoveNextAsync().AsTask();
+        time.Advance(S(1));                                  // 1 s real = 3 s session: (0, 3]
+        Assert.True(await next);
+        Assert.Equal(new[] { channels[0] }, batches.Current.Channels);
+
+        next = batches.MoveNextAsync().AsTask();
+        time.Advance(S(1));                                  // (3, 6]
+        Assert.True(await next);
+        Assert.Equal(new[] { channels[1] }, batches.Current.Channels);
+
+        next = batches.MoveNextAsync().AsTask();
+        time.Advance(S(1));                                  // (6, 9]
+        Assert.True(await next);
+        Assert.Equal(new[] { channels[2] }, batches.Current.Channels);
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenTheClockFinishes_EndsTheStream()
+    {
+        var time = new FakeTimeProvider();
+        var engine = new ReplayEngine(PlayingClock(end: S(5)),
+            new[] { ChannelAt(1), ChannelAt(4) }, Array.Empty<PositionSample>(), time);
+
+        await using var batches = engine.RunAsync(S(1)).GetAsyncEnumerator();
+
+        var next = batches.MoveNextAsync().AsTask();
+        time.Advance(S(1));                                  // (0, 3]
+        Assert.True(await next);
+
+        next = batches.MoveNextAsync().AsTask();
+        time.Advance(S(1));                                  // would be (3, 6], clamped to (3, 5]
+        Assert.True(await next);
+        Assert.Equal(S(5), batches.Current.To);
+
+        Assert.False(await batches.MoveNextAsync());         // the stream is over; no more time needed
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenCancelled_StopsWithOperationCanceled()
+    {
+        var time = new FakeTimeProvider();
+        var engine = new ReplayEngine(PlayingClock(), Array.Empty<ChannelSample>(), Array.Empty<PositionSample>(), time);
+        using var cts = new CancellationTokenSource();
+
+        await using var batches = engine.RunAsync(S(1), cts.Token).GetAsyncEnumerator();
+        var next = batches.MoveNextAsync().AsTask();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => next);
     }
 }

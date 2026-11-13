@@ -1,9 +1,52 @@
 ﻿using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Slipstream.Core;
 
 var mode = args[0];
+
+if (mode == "replay")
+{
+    var folder = args[1];
+    var speed   = args.Length > 2 ? double.Parse(args[2], CultureInfo.InvariantCulture) : 60;
+    var minutes = args.Length > 3 ? double.Parse(args[3], CultureInfo.InvariantCulture) : 20;
+
+    var (sessionClock, _, _) = LoadWindow(folder);
+    var carSamples = SampleWindow.Within(
+        CarDataFile.Read(Path.Combine(folder, "CarData.z.jsonStream"), sessionClock),
+        TimeSpan.Zero, TimeSpan.FromMinutes(minutes)).ToList();
+    var positionSamples = SampleWindow.Within(
+        PositionDataFile.Read(Path.Combine(folder, "Position.z.jsonStream"), sessionClock),
+        TimeSpan.Zero, TimeSpan.FromMinutes(minutes)).ToList();
+
+
+    var replayClock = new ReplayClock(start: TimeSpan.Zero, end: TimeSpan.FromMinutes(minutes))
+    {
+        Speed = speed
+    };
+    replayClock.Play();
+
+    var replayEngine = new ReplayEngine(replayClock, carSamples, positionSamples);
+    using var cts = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+    try
+    {
+        await foreach (var batch in replayEngine.RunAsync(TimeSpan.FromMilliseconds(100), cts.Token))
+        {
+            Console.WriteLine($"t = {batch.To.ToString(@"hh\:mm\:ss\.f")}   " +
+                            $"channels: {batch.Channels.Count,5}   positions: {batch.Positions.Count,4}");
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine("stopped");
+    }
+
+    return 0;
+}
+
 var input = args[1];
 var outDir = args[2];
 Directory.CreateDirectory(outDir);
@@ -17,7 +60,7 @@ void WriteState(string topic, JsonNode state) =>
 {
     // 1. Reduce SessionInfo.jsonStream to its final state.
     var reducer = new SessionReducer();
-    foreach (var line in ArchiveReader.ReadTopic(Path.Combine(input, "SessionInfo.jsonStream")))
+    foreach (var line in ArchiveReader.ReadTopic(Path.Combine(archiveDir, "SessionInfo.jsonStream")))
         reducer.Feed("SessionInfo", line.Payload);
     var info = reducer.GetState("SessionInfo")!;
 
@@ -101,7 +144,7 @@ else if (mode == "positions")
     var stopwatch = Stopwatch.StartNew();
 
     await ParquetPositionSamples.WriteAsync(path, samples);
-    var readBack = await ParquetChannelSamples.ReadAsync(path);
+    var readBack = await ParquetPositionSamples.ReadAsync(path);
 
     Console.WriteLine($"Time Elapsed: {stopwatch.Elapsed.TotalSeconds:F1} seconds");
     Console.WriteLine($"Rows read back: {readBack.Count}");
@@ -109,7 +152,7 @@ else if (mode == "positions")
 }
 else
 {
-    Console.Error.WriteLine("Usage: <archive|live|cardata|positions> <input> <outDir>");
+    Console.Error.WriteLine("Usage: <archive|live|carData|positions|replay> <input> <outDir>");
     return 1;
 }
 
