@@ -13,6 +13,18 @@ if (mode == "replay")
     var minutes = args.Length > 3 ? double.Parse(args[3], CultureInfo.InvariantCulture) : 20;
 
     var (sessionClock, _, _) = LoadWindow(folder);
+
+    var streamStart = TimedDeltaFile.ReadStreamStart(Path.Combine(folder, "Heartbeat.jsonStream"));
+    var driverList = TimedDeltaFile.Read(Path.Combine(folder, "DriverList.jsonStream"), "DriverList", streamStart, sessionClock);
+    var timingList = TimedDeltaFile.Read(Path.Combine(folder, "TimingData.jsonStream"), "TimingData", streamStart, sessionClock);
+    var allDeltas = driverList
+        .Concat(timingList)
+        .OrderBy(d => d.SessionTime)
+        .ToList();
+    
+    var timingState = new TimingState();
+    timingState.Apply(allDeltas.Where(d => d.SessionTime <= TimeSpan.Zero));
+
     var carSamples = SampleWindow.Within(
         CarDataFile.Read(Path.Combine(folder, "CarData.z.jsonStream"), sessionClock),
         TimeSpan.Zero, TimeSpan.FromMinutes(minutes)).ToList();
@@ -27,21 +39,65 @@ if (mode == "replay")
     };
     replayClock.Play();
 
-    var replayEngine = new ReplayEngine(replayClock, carSamples, positionSamples);
+    var replayEngine = new ReplayEngine(replayClock, carSamples, positionSamples, deltas: allDeltas);
     using var cts = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+    var nextPrint = TimeSpan.Zero;
 
     try
     {
         await foreach (var batch in replayEngine.RunAsync(TimeSpan.FromMilliseconds(100), cts.Token))
         {
-            Console.WriteLine($"t = {batch.To.ToString(@"hh\:mm\:ss\.f")}   " +
-                            $"channels: {batch.Channels.Count,5}   positions: {batch.Positions.Count,4}");
+            timingState.Apply(batch.Deltas);
+
+            if (batch.To >= nextPrint)
+            {
+                Console.WriteLine($"t = {batch.To.ToString(@"hh\:mm\:ss\.f")}");
+                
+                foreach (var row in timingState.Leaderboard().Take(5))
+                {
+                    Console.WriteLine($"  {row.Position,2} {row.Tla,-4} {row.Gap,9} {row.Interval,9}{(row.InPit ? "  PIT" : "")}");
+                }
+
+                Console.WriteLine($"t = {batch.To.ToString(@"hh\:mm\:ss\.f")}   " +
+                            $"channels: {batch.Channels.Count,5}   positions: {batch.Positions.Count,4}\n");
+
+                nextPrint += TimeSpan.FromSeconds(10);
+            }
         }
     }
     catch (OperationCanceledException)
     {
         Console.WriteLine("stopped");
+    }
+
+    return 0;
+}
+else if (mode == "timing")
+{
+    var folder = args[1];
+    var (clock, _, _) = LoadWindow(folder);
+
+    var streamStart = TimedDeltaFile.ReadStreamStart(Path.Combine(folder, "Heartbeat.jsonStream"));
+    Console.WriteLine($"stream start: {streamStart:u}");
+
+    var timing = TimedDeltaFile.Read(
+        Path.Combine(folder, "TimingData.jsonStream"), "TimingData", streamStart, clock).ToList();
+    var outOfOrder = timing
+        .Where((item, index) => index > 0 && timing[index].SessionTime < timing[index - 1].SessionTime)
+        .Count();
+    Console.WriteLine($"TimingData: {timing.Count} deltas, first {timing[0].SessionTime}, last {timing[^1].SessionTime}, out of order: {outOfOrder}");
+
+    var statuses = TimedDeltaFile.Read(
+        Path.Combine(folder, "SessionStatus.jsonStream"), "SessionStatus", streamStart, clock);
+    foreach (var d in statuses)
+    {
+        if ((string?) d.Payload["Status"] != null)
+        {
+            Console.WriteLine($"SessionTime: {d.SessionTime}");
+            Console.WriteLine($"Status: {d.Payload["Status"]}");
+        }
     }
 
     return 0;

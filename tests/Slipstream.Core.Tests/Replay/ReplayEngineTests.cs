@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Time.Testing;
+using System.Text.Json.Nodes;
 
 namespace Slipstream.Core.Tests;
 
@@ -19,6 +20,9 @@ public class ReplayEngineTests
         clock.Play();
         return clock;
     }
+
+    private static TimedDelta DeltaAt(double seconds, string topic = "TimingData") =>
+        new(S(seconds), topic, JsonNode.Parse("{}")!);
 
     [Fact]
     public void Tick_ReturnsTheSamplesInTheRangeFromBothLists()
@@ -137,5 +141,26 @@ public class ReplayEngineTests
         cts.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => next);
+    }
+
+    [Fact]
+    public void Tick_SlicesDeltasInRange()
+    {
+        var deltas = new[] { DeltaAt(0), DeltaAt(1), DeltaAt(2), DeltaAt(3) };
+        var engine = new ReplayEngine(PlayingClock(), Array.Empty<ChannelSample>(),
+                                    Array.Empty<PositionSample>(), deltas: deltas);
+
+        var batch = engine.Tick(S(2));   // clock at 0, speed 3 -> range (0, 3]
+
+        Assert.Equal(new[] { S(1), S(2), S(3) }, batch.Deltas.Select(d => d.SessionTime));
+    }
+
+    [Fact]
+    public void Tick_NoDeltasGiven_ReturnsEmptyDeltas()
+    {
+        var engine = new ReplayEngine(PlayingClock(), Array.Empty<ChannelSample>(),
+                                    Array.Empty<PositionSample>());
+
+        Assert.Empty(engine.Tick(S(1)).Deltas);
     }
 }

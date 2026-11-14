@@ -6,14 +6,16 @@ public sealed class ReplayEngine(
     ReplayClock clock,
     IReadOnlyList<ChannelSample> channels,
     IReadOnlyList<PositionSample> positions,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IReadOnlyList<TimedDelta>? deltas = null)
 {
     public ReplayBatch Tick(TimeSpan realElapsed)
     {
         var (from, to) = clock.Advance(realElapsed);
         var channelList = ReplaySlice.Between(channels, from, to);
         var positionList = ReplaySlice.Between(positions, from, to);
-        return new ReplayBatch(from, to, channelList, positionList);
+        var deltasList = ReplaySlice.Between(deltas ?? Array.Empty<TimedDelta>(), from, to);
+        return new ReplayBatch(from, to, channelList, positionList, deltasList);
     }
 
     public async IAsyncEnumerable<ReplayBatch> RunAsync(TimeSpan interval, [EnumeratorCancellation] CancellationToken cancellationToken = default)
