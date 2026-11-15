@@ -45,7 +45,13 @@ Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for
 
 ## Stage 3: Analysis exploration (Python notebooks)
 
-**Build:** lap table, stint table, distance-aligned lap comparison with delta line, sector bests, first session brief.
+**Build** (every step takes a focus driver and an optional reference car, the teammate by default; all cars stay in the data, see the focus-driver rule in `CLAUDE.md`):
+1. Lap table for all drivers: lap number, lap time, sector times, compound, tyre age, in-lap and out-lap flags. This also settles what a lap and a stint are in this data.
+2. Stint table from `TyreStintSeries` and `CurrentTyres`.
+3. Distance-aligned comparison of any two laps with a delta-time line, defaulting to the focus driver against the teammate. The car data has no distance channel, so distance is built by integrating speed or from the `X`/`Y` track coordinates; this is the main technical question of the stage.
+4. Sector bests and ideal lap for the focus driver and the reference.
+5. A session brief relative to the focus driver: biggest time loss against the reference, pace ranking.
+Also settle along the way: the FastF1 one-lap cross-check of the car-data channels and `Position` units, and how to treat `Z == 0` dropouts.
 
 **Learn:** DuckDB over Parquet.
 

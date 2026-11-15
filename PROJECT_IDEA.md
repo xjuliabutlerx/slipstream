@@ -79,6 +79,14 @@ Most of this stack is new to me, so this project is as much a learning plan as a
 - Jump-to-event navigation (pit stops, safety cars, large pace changes) so users do not have to sit through a full session.
 - Optional commentary layer that turns model output into radio-style calls.
 
+### Focus driver
+
+The user picks one driver to focus on, and the dashboard centres its telemetry, laps and strategy views on that driver. The rest of the field is never dropped: strategy analysis needs the other cars (the car ahead and behind for undercut and overcut windows, rivals' stints and pit stops, Safety Car and VSC state), and the default comparison is the focus driver against their teammate.
+
+- Focus is a view, not a data decision: the data layer, the replay engine and the leaderboard always carry all cars. The frontend holds the focus state, and the analysis functions take a focus driver and an optional reference (the teammate by default, or any other car).
+- The teammate is the other car with the same `TeamName` in `DriverList`.
+- The session brief and the BoxBoxBot tools are written relative to the focus driver (for example, "biggest time loss against the teammate"), and the BoxBoxBot panel already knows the selected driver, lap and replay position.
+
 ### Interactive "strategist" mode
 The replay pauses at key moments (pit window opens, safety car, rival pits) and asks the user what they would do. It then reveals what the team actually did and what the model estimated.
 

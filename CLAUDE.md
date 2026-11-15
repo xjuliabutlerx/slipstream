@@ -16,6 +16,7 @@ The folder may still be named `new-f1-project`; the user plans to rename it to `
 - Fallback: build the reducer in Python first and port, if C# stalls.
 - Frontend: TypeScript + React. Recommended Vite over Next.js unless a real need appears (user's doc says Next.js; not final). Plotly.js or D3 for charts.
 - BoxBoxBot panel is a TypeScript agent in the browser, bring-your-own-key. See `PROJECT_IDEA.md` for the key-handling safeguards.
+- **Focus driver (see `PROJECT_IDEA.md`):** the user focuses on one driver, but the pipeline never filters by driver. Parquet files, the replay engine and the leaderboard carry all cars. Analysis functions (laps, stints, lap comparison, session brief, BoxBoxBot tools) take a focus driver and an optional reference car, the teammate by default (same `TeamName` in `DriverList`). Other cars are needed for strategy: the car ahead and behind, rivals' stints and pit stops, Safety Car and VSC state.
 - Name: "Slipstream" (the user suggested it; availability on GitHub/npm/NuGet not yet checked). Avoid "F1"/"Formula 1" in the display name (trademark); describe it as "unofficial".
 
 ## Files
