@@ -93,6 +93,51 @@ if (mode == "replay")
 
                 nextPrint = batch.To + TimeSpan.FromSeconds(10);
             }
+
+            if (!Console.IsInputRedirected)
+            {
+                var seekSeconds = 0;
+
+                while (Console.KeyAvailable)
+                {
+                    var key = Console.ReadKey(intercept: true).Key;
+                    switch (key)
+                    {
+                        case ConsoleKey.Spacebar:
+                            if (replayClock.IsPlaying) replayClock.Pause(); else replayClock.Play();
+                            Console.WriteLine(replayClock.IsPlaying ? "[playing]" : "[paused]");
+                            break;
+
+                        case ConsoleKey.RightArrow:
+                            seekSeconds += 60;
+                            break;
+
+                        case ConsoleKey.LeftArrow:
+                            seekSeconds -= 60;
+                            break;
+
+                        case ConsoleKey.UpArrow:
+                            replayClock.Speed *= 2;
+                            Console.WriteLine($"[speed {replayClock.Speed}x]");
+                            break;
+
+                        case ConsoleKey.DownArrow:
+                            replayClock.Speed = Math.Max(1, replayClock.Speed / 2);
+                            Console.WriteLine($"[speed {replayClock.Speed}x]");
+                            break;
+                    }
+                }
+
+                if (seekSeconds != 0)
+                {
+                    var target = Math.Max(0, replayClock.SessionTime.TotalSeconds + seekSeconds);
+                    replayClock.Seek(TimeSpan.FromSeconds(target));
+                    timingState = TimingState.At(allDeltas, replayClock.SessionTime);
+                    nextPrint = replayClock.SessionTime;
+                    wasHolding = false;
+                    Console.WriteLine($"[seek -> {replayClock.SessionTime.ToString(@"hh\:mm\:ss")}]");
+                }
+            }
         }
     }
     catch (OperationCanceledException)
