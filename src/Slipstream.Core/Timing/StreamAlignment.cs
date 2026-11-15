@@ -2,6 +2,8 @@ namespace Slipstream.Core;
 
 public static class StreamAlignment
 {
+    public static readonly TimeSpan HeartbeatPayloadLead = TimeSpan.FromSeconds(2.05);
+
     // Pairs of (archive offset, absolute Utc) taken from Heartbeat lines, in file order.
     public static DateTimeOffset EstimateStreamStart(
         IEnumerable<(TimeSpan Offset, DateTimeOffset Utc)> pairs)

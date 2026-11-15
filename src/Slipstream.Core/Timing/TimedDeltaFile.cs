@@ -5,7 +5,7 @@ public static class TimedDeltaFile
     // Heartbeat.jsonStream -> the stream's start time.
     public static DateTimeOffset ReadStreamStart(string heartbeatPath)
     {
-        return StreamAlignment.EstimateStreamStart(StreamAlignment.PairsFrom(ArchiveReader.ReadTopic(heartbeatPath)));
+        return StreamAlignment.EstimateStreamStart(StreamAlignment.PairsFrom(ArchiveReader.ReadTopic(heartbeatPath))) - StreamAlignment.HeartbeatPayloadLead;
     }
 
     // Any plain-topic .jsonStream -> time-stamped deltas on the session clock.

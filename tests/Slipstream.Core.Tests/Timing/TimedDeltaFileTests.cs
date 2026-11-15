@@ -16,7 +16,7 @@ public class TimedDeltaFileTests
 
         var start = TimedDeltaFile.ReadStreamStart(file.Path);
 
-        Assert.Equal(new DateTimeOffset(2030, 1, 1, 11, 50, 0, TimeSpan.Zero), start);
+        Assert.Equal(new DateTimeOffset(2030, 1, 1, 11, 50, 0, TimeSpan.Zero) - StreamAlignment.HeartbeatPayloadLead, start);
     }
 
     [Fact]
