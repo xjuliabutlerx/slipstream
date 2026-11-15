@@ -38,3 +38,4 @@ tzdata==2026.6
 url-normalize==3.1.0
 urllib3==2.8.0
 websockets==17.3
+duckdb==2.0.0

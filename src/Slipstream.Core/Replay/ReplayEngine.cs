@@ -1,0 +1,40 @@
+using System.Runtime.CompilerServices;
+
+namespace Slipstream.Core;
+
+public sealed class ReplayEngine(
+    ReplayClock clock,
+    IReadOnlyList<ChannelSample> channels,
+    IReadOnlyList<PositionSample> positions,
+    TimeProvider? timeProvider = null,
+    IReadOnlyList<TimedDelta>? deltas = null)
+{
+    public ReplayBatch Tick(TimeSpan realElapsed)
+    {
+        var (from, to) = clock.Advance(realElapsed);
+        IReadOnlyList<ChannelSample> channelList = clock.LastAdvanceSkipped
+            ? Array.Empty<ChannelSample>()
+            : ReplaySlice.Between(channels, from, to);
+        IReadOnlyList<PositionSample> positionList = clock.LastAdvanceSkipped
+            ? Array.Empty<PositionSample>()
+            : ReplaySlice.Between(positions, from, to);
+        var deltasList = ReplaySlice.Between(deltas ?? Array.Empty<TimedDelta>(), from, to);
+        return new ReplayBatch(from, to, channelList, positionList, deltasList);
+    }
+
+    public async IAsyncEnumerable<ReplayBatch> RunAsync(TimeSpan interval, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var time = timeProvider ?? TimeProvider.System;
+        using var timer = new PeriodicTimer(interval, time);
+        var last = time.GetTimestamp();
+
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            var now = time.GetTimestamp();
+            yield return Tick(time.GetElapsedTime(last, now));
+            last = now;
+
+            if (clock.IsFinished) yield break;
+        }
+    }
+}

@@ -1,8 +1,181 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Slipstream.Core;
 
 var mode = args[0];
+
+if (mode == "replay")
+{
+    var folder = args[1];
+    var speed   = args.Length > 2 ? double.Parse(args[2], CultureInfo.InvariantCulture) : 60;
+    var minutes = args.Length > 3 ? double.Parse(args[3], CultureInfo.InvariantCulture) : 20;
+    var timingOnly = args.Length > 4 && args[4] == "timing-only";
+
+    var (sessionClock, _, _) = LoadWindow(folder);
+
+    var streamStart = TimedDeltaFile.ReadStreamStart(Path.Combine(folder, "Heartbeat.jsonStream"));
+    var driverList = TimedDeltaFile.Read(Path.Combine(folder, "DriverList.jsonStream"), "DriverList", streamStart, sessionClock);
+    var timingList = TimedDeltaFile.Read(Path.Combine(folder, "TimingData.jsonStream"), "TimingData", streamStart, sessionClock);
+    var allDeltas = driverList
+        .Concat(timingList)
+        .OrderBy(d => d.SessionTime)
+        .ToList();
+    var statuses = TimedDeltaFile.Read(
+        Path.Combine(folder, "SessionStatus.jsonStream"), "SessionStatus", streamStart, sessionClock).ToList();
+    var stoppages = RedFlagPeriods.From(statuses);
+    foreach (var s in stoppages)
+    {
+        Console.WriteLine($"Red flag found: {s.Start.ToString(@"hh\:mm\:ss")} to {s.End.ToString(@"hh\:mm\:ss")}");
+    }
+    
+    var timingState = new TimingState();
+    timingState.Apply(allDeltas.Where(d => d.SessionTime <= TimeSpan.Zero));
+
+    var carSamples = new List<ChannelSample>();
+    var positionSamples = new List<PositionSample>();
+    if (!timingOnly)
+    {
+        carSamples = SampleWindow.Within(
+            CarDataFile.Read(Path.Combine(folder, "CarData.z.jsonStream"), sessionClock),
+            TimeSpan.Zero, TimeSpan.FromMinutes(minutes)).ToList();
+        positionSamples = SampleWindow.Within(
+            PositionDataFile.Read(Path.Combine(folder, "Position.z.jsonStream"), sessionClock),
+            TimeSpan.Zero, TimeSpan.FromMinutes(minutes)).ToList();
+    }
+
+    var replayClock = new ReplayClock(
+        start: TimeSpan.Zero,
+        end: TimeSpan.FromMinutes(minutes),
+        stoppages: stoppages,
+        hold: TimeSpan.FromSeconds(3))
+    {
+        Speed = speed
+    };
+    replayClock.Play();
+
+    var replayEngine = new ReplayEngine(replayClock, carSamples, positionSamples, deltas: allDeltas);
+    using var cts = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+    var nextPrint = TimeSpan.Zero;
+    var wasHolding = false;
+
+    try
+    {
+        await foreach (var batch in replayEngine.RunAsync(TimeSpan.FromMilliseconds(100), cts.Token))
+        {
+            timingState.Apply(batch.Deltas);
+            
+            if (replayClock.IsHolding && !wasHolding)
+            {
+                Console.WriteLine($"*** RED FLAG at {batch.To.ToString(@"hh\:mm\:ss")} ***");
+            }
+            
+            if (replayClock.LastAdvanceSkipped)
+            {
+                Console.WriteLine($"*** RESTART: skipped to {batch.To.ToString(@"hh\:mm\:ss")} ***");
+            }
+            wasHolding = replayClock.IsHolding;
+
+            if (batch.To >= nextPrint)
+            {
+                Console.WriteLine($"t = {batch.To.ToString(@"hh\:mm\:ss\.f")}");
+                
+                foreach (var row in timingState.Leaderboard().Take(5))
+                {
+                    Console.WriteLine($"  {row.Position,2} {row.Tla,-4} {row.Gap,9} {row.Interval,9}{(row.InPit ? "  PIT" : "")}");
+                }
+
+                Console.WriteLine($"t = {batch.To.ToString(@"hh\:mm\:ss\.f")}   " +
+                            $"channels: {batch.Channels.Count,5}   positions: {batch.Positions.Count,4}\n");
+
+                nextPrint = batch.To + TimeSpan.FromSeconds(10);
+            }
+
+            if (!Console.IsInputRedirected)
+            {
+                var seekSeconds = 0;
+
+                while (Console.KeyAvailable)
+                {
+                    var key = Console.ReadKey(intercept: true).Key;
+                    switch (key)
+                    {
+                        case ConsoleKey.Spacebar:
+                            if (replayClock.IsPlaying) replayClock.Pause(); else replayClock.Play();
+                            Console.WriteLine(replayClock.IsPlaying ? "[playing]" : "[paused]");
+                            break;
+
+                        case ConsoleKey.RightArrow:
+                            seekSeconds += 60;
+                            break;
+
+                        case ConsoleKey.LeftArrow:
+                            seekSeconds -= 60;
+                            break;
+
+                        case ConsoleKey.UpArrow:
+                            replayClock.Speed *= 2;
+                            Console.WriteLine($"[speed {replayClock.Speed}x]");
+                            break;
+
+                        case ConsoleKey.DownArrow:
+                            replayClock.Speed = Math.Max(1, replayClock.Speed / 2);
+                            Console.WriteLine($"[speed {replayClock.Speed}x]");
+                            break;
+                    }
+                }
+
+                if (seekSeconds != 0)
+                {
+                    var target = Math.Max(0, replayClock.SessionTime.TotalSeconds + seekSeconds);
+                    replayClock.Seek(TimeSpan.FromSeconds(target));
+                    timingState = TimingState.At(allDeltas, replayClock.SessionTime);
+                    nextPrint = replayClock.SessionTime;
+                    wasHolding = false;
+                    Console.WriteLine($"[seek -> {replayClock.SessionTime.ToString(@"hh\:mm\:ss")}]");
+                }
+            }
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine("stopped");
+    }
+
+    return 0;
+}
+else if (mode == "timing")
+{
+    var folder = args[1];
+    var (clock, _, _) = LoadWindow(folder);
+
+    var streamStart = TimedDeltaFile.ReadStreamStart(Path.Combine(folder, "Heartbeat.jsonStream"));
+    Console.WriteLine($"stream start: {streamStart:u}");
+
+    var timing = TimedDeltaFile.Read(
+        Path.Combine(folder, "TimingData.jsonStream"), "TimingData", streamStart, clock).ToList();
+    var outOfOrder = timing
+        .Where((item, index) => index > 0 && timing[index].SessionTime < timing[index - 1].SessionTime)
+        .Count();
+    Console.WriteLine($"TimingData: {timing.Count} deltas, first {timing[0].SessionTime}, last {timing[^1].SessionTime}, out of order: {outOfOrder}");
+
+    var statuses = TimedDeltaFile.Read(
+        Path.Combine(folder, "SessionStatus.jsonStream"), "SessionStatus", streamStart, clock);
+    foreach (var d in statuses)
+    {
+        if ((string?) d.Payload["Status"] != null)
+        {
+            Console.WriteLine($"SessionTime: {d.SessionTime}");
+            Console.WriteLine($"Status: {d.Payload["Status"]}");
+        }
+    }
+
+    return 0;
+}
+
 var input = args[1];
 var outDir = args[2];
 Directory.CreateDirectory(outDir);
@@ -12,12 +185,41 @@ var options = new JsonSerializerOptions { WriteIndented = true };
 void WriteState(string topic, JsonNode state) =>
     File.WriteAllText(Path.Combine(outDir, topic + ".json"), state.ToJsonString(options));
 
+(SessionClock Clock, TimeSpan From, TimeSpan To) LoadWindow(string archiveDir)
+{
+    // 1. Reduce SessionInfo.jsonStream to its final state.
+    var reducer = new SessionReducer();
+    foreach (var line in ArchiveReader.ReadTopic(Path.Combine(archiveDir, "SessionInfo.jsonStream")))
+        reducer.Feed("SessionInfo", line.Payload);
+    var info = reducer.GetState("SessionInfo")!;
+
+    // 2. Clock and window from it.
+    var clock = SessionWindow.ClockFrom(info);
+    var (fromUtc, toUtc) = SessionWindow.WindowFrom(info, TimeSpan.FromMinutes(90), TimeSpan.FromMinutes(30));
+    var from = fromUtc - clock.StartUtc;
+    var to   = toUtc   - clock.StartUtc;
+
+    return (clock, from, to);
+}
+
 if (mode == "archive")
 {
     foreach (var path in Directory.GetFiles(input, "*.jsonStream").Order())
     {
-        // ...your existing loop body, with the write replaced by:
-        // if (reducer.GetState(topic) is { } state) WriteState(topic, state);
+        var topic = Path.GetFileName(path)[..^".jsonStream".Length];
+        if (topic.EndsWith(".z")) continue;
+
+        var reducer = new SessionReducer();   // one per topic keeps memory small
+        var count = 0;
+
+        foreach (var line in ArchiveReader.ReadTopic(path))
+        {
+            reducer.Feed(topic, line.Payload);
+            count++;
+        }
+
+        if (reducer.GetState(topic) is { } state) WriteState(topic, state);
+        Console.WriteLine($"{topic,-28} {count,7} messages");
     }
 }
 else if (mode == "live")
@@ -38,9 +240,48 @@ else if (mode == "live")
         Console.WriteLine($"{topic,-28} {counts[topic],7} messages");
     }
 }
+else if (mode == "carData")
+{
+    var (clock, from, to) = LoadWindow(input);
+
+    // Read the car data, filter, and report.
+    var samples = SampleWindow.Within(CarDataFile.Read(Path.Combine(input, "CarData.z.jsonStream"), clock), from, to);
+
+    // Write the car data into parquet files.
+    var path = Path.Combine(outDir, "cardata.parquet");
+    Stopwatch stopwatch = Stopwatch.StartNew();
+
+    await ParquetChannelSamples.WriteAsync(path, samples);
+
+    TimeSpan ts = stopwatch.Elapsed;
+    double writeSeconds = ts.TotalSeconds;
+
+    // var readBack = await ParquetChannelSamples.ReadAsync(path);
+
+    Console.WriteLine($"Time Elapsed: {writeSeconds:F1} seconds");
+    // Console.WriteLine($"Rows read back: {readBack.Count}");
+    Console.WriteLine($"File Size: {new FileInfo(path).Length / 1_000_000.0:F1} MB");
+}
+else if (mode == "positions")
+{
+    var (clock, from, to) = LoadWindow(input);
+
+    var samples = SampleWindow.Within(
+        PositionDataFile.Read(Path.Combine(input, "Position.z.jsonStream"), clock), from, to);
+
+    var path = Path.Combine(outDir, "position.parquet");
+    var stopwatch = Stopwatch.StartNew();
+
+    await ParquetPositionSamples.WriteAsync(path, samples);
+    var readBack = await ParquetPositionSamples.ReadAsync(path);
+
+    Console.WriteLine($"Time Elapsed: {stopwatch.Elapsed.TotalSeconds:F1} seconds");
+    Console.WriteLine($"Rows read back: {readBack.Count}");
+    Console.WriteLine($"File Size: {new FileInfo(path).Length / 1_000_000.0:F1} MB");
+}
 else
 {
-    Console.Error.WriteLine("Usage: <archive|live> <input> <outDir>");
+    Console.Error.WriteLine("Usage: <archive|live|carData|positions|replay> <input> <outDir>");
     return 1;
 }
 

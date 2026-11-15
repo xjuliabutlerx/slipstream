@@ -26,19 +26,22 @@ Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for
 
 **Done when:** the reducer's final state matches the archive's for every session (the Python comparison script is the reference), and tests cover `_deleted`, empty snapshots and keyframes. The red-flag pause moved to Stage 2, since only the replay engine has a notion of time.
 
-**Status: done.** Archive path: C# equals the Python reference for every topic in all five sessions. Live path vs archive: every remaining difference is a capture gap, not a reducer bug (see `CLAUDE.md` Status). Added beyond the original scope: `_kf` keyframe handling (found by the live comparison), an archive reader, a live reader, a CLI, and the Python reference and compare scripts in `tools/`. Built but unused until Stage 2: `ZDecoder`, `SessionClock`.
+**Status: done.** Archive path: C# equals the Python reference for every topic in all five sessions. Live path vs archive: every remaining difference is a capture gap, not a reducer bug (see `CLAUDE.md` Status). Added beyond the original scope: `_kf` keyframe handling (found by the live comparison), an archive reader, a live reader, a CLI, and the Python reference and compare scripts in `tools/`. `ZDecoder` and `SessionClock` were built here and are now used by Stage 2.
 
 ## Stage 2: Normalizer and replay engine (C#)
 
 **Build**
-- Verify the car-data channel meanings against known values, then fix units.
-- Channel-sample schema: `session_time, car, channel, value, unit`, written to Parquet.
+- Verify the car-data channel meanings against known values, then fix units. (Done; a FastF1 one-lap cross-check is still open.)
+- Session clock from `SessionInfo` (scheduled `StartDate` + `GmtOffset`) and a time window around the session that drops stale data. (Done.)
+- Channel-sample schema: `session_time, car, channel, value, unit`, written to Parquet. (Done for `CarData.z` and `Position.z`: `SessionSeconds` as a double; write in 100,000-row groups. Position is a separate `PositionSample` (X, Y, Z in metres, `Status`) with its own normalizer, reader and writer; both sample types share one generic `SampleWindow.Within` through `ISessionTimed`.)
 - Live-file adapter and archive adapter feeding one reducer.
-- Replay engine: original timing, speed factor, pauses through red flags, scrub.
+- Replay engine: original timing, speed factor, scrub. Red flags (`Aborted` to `Started`) show a brief "red flag" pause and then auto-skip to the restart, with the clock showing real elapsed time.
 
 **Learn:** async streams / `IAsyncEnumerable`, Parquet.Net.
 
-**Done when:** replaying the Race at 60x produces a plausible leaderboard, the live and archive paths give the same output, and the replay pauses through the red flag (`SessionStatus` `Aborted` to `Started`).
+**Done when:** replaying the Race at 60x produces a plausible leaderboard, the live and archive paths give the same output, and the replay shows the red flag as a brief pause and then skips to the restart (`SessionStatus` `Aborted` to `Started`).
+
+**Status: done** (against the "done when" check; the deferred items below do not block it). Done: channel meanings, `ChannelSample` + `CarDataNormalizer` + `CarDataFile`, `SessionInfo`-based clock and window, the filter, and the Parquet writer. Race check: 4,788,190 of 5,049,880 samples kept, from -00:48:55 to 02:28:39.9, written to a 14.1 MB Parquet file (about 3 s, about 150 MB peak memory with 100,000-row groups; the default row group size used 1.18 GB) and checked in DuckDB. `Position.z` is done the same way: 941,150 rows in 7.4 MB (about 2.1 s), `(0, 0, 0)` placeholders dropped, units decimetres converted to metres, with `Z` dropouts noted in `CLAUDE.md`. Replay engine, first working version: `ReplaySlice.Between` (the samples in `(from, to]` by binary search), `ReplayClock` (play, pause, speed, seek, end), `ReplayEngine.Tick` and the `IAsyncEnumerable` loop `RunAsync` (tested with a fake time provider), and a CLI `replay` mode that prints the Race's first minutes at 60x. Timing path done: `Leaderboard`, `StreamAlignment` (stream start from the `Heartbeat` median, frozen tail excluded), `TimedDelta` and its file reader, `TimingState`, and deltas carried by `ReplayEngine`/`ReplayBatch`; the CLI `replay` mode prints the top 5 every 10 s of session time (checked on the Race at 60x: gaps consistent, lap pace about 82 to 87 s, a VSC-like gap jump near 00:12; 115 tests). Alignment check: the heartbeat payload `Utc` runs a constant 2.05 s ahead of the clock the rest of the feed uses (found by comparing live `SessionStatus` `Utc` with the archive-aligned times, Race and Qualifying); `ReadStreamStart` now subtracts that constant and archive status times match the live `Utc` within 2 to 4 ms. Red flag done: `RedFlagPeriods` (Race 01:06:04 to 01:45:02; Qualifying `Aborted` 00:06:56 to `Started` 00:14:02), the clock holds 3 s of real time at a stoppage and then jumps to the restart, the engine drops samples but keeps timing deltas on the skip tick, `Seek` cancels a hold and clamps to `End`, `TimingState.At` rebuilds the board for a scrub (134 tests). Checked on the Race: the board at the restart shows lap 46 and `PIT` on the top five rows, so the deltas from the stoppage were applied. Dead-time skipping is dropped: there are no sample gaps over 5 s in the Race (apart from one before the session) or in Qualifying. Scrubbing is done: the CLI `replay` mode has keyboard controls (pause, seek, speed) that call `ReplayClock.Seek` and `TimingState.At`, and `ScrubConsistencyTests` proves streaming and scrubbing give the same board (136 tests). Deferred: chunked reading instead of whole sample lists, a final-board check against the Python reference, rewind checkpoints (only if rebuilding becomes too slow: it takes 23 to 135 ms on the Race), and re-checking the 2.05 s heartbeat lead on FP1, FP2 and FP3. First DuckDB lap queries move to Stage 3.
 
 ## Stage 3: Analysis exploration (Python notebooks)
 
@@ -87,7 +90,7 @@ Staged plan for the F1 Session Replay & Strategy Tool (see `PROJECT_IDEA.md` for
 
 ## Stage 9: Port ingestion to C#
 
-**Build:** the sign-in flow (config scrape, PKCE, `pi.flow`, subscription-token claim, token cache), the live SignalR client with the negotiate cookie, and the archive downloader.
+**Build:** the sign-in flow (config scrape, PKCE, `pi.flow`, subscription-token claim, token cache), the live SignalR client with the negotiate cookie, and the archive downloader. Add a race-calendar client: FastF1's `f1timing` backend reads the season `Index.json` at `/static/{year}/` (per meeting: `Name`, `Location`, `Country`, `Number`, `Sessions[]` with `Name`, `StartDate`, `GmtOffset`, `Path`). Use it to build archive paths (no hand-built race-day dates) and to decide when to stream live.
 
 **Reference:** `f1_client.py` and FastF1.
 
