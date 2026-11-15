@@ -11,6 +11,7 @@ if (mode == "replay")
     var folder = args[1];
     var speed   = args.Length > 2 ? double.Parse(args[2], CultureInfo.InvariantCulture) : 60;
     var minutes = args.Length > 3 ? double.Parse(args[3], CultureInfo.InvariantCulture) : 20;
+    var timingOnly = args.Length > 4 && args[4] == "timing-only";
 
     var (sessionClock, _, _) = LoadWindow(folder);
 
@@ -21,19 +22,34 @@ if (mode == "replay")
         .Concat(timingList)
         .OrderBy(d => d.SessionTime)
         .ToList();
+    var statuses = TimedDeltaFile.Read(
+        Path.Combine(folder, "SessionStatus.jsonStream"), "SessionStatus", streamStart, sessionClock).ToList();
+    var stoppages = RedFlagPeriods.From(statuses);
+    foreach (var s in stoppages)
+    {
+        Console.WriteLine($"Red flag found: {s.Start.ToString(@"hh\:mm\:ss")} to {s.End.ToString(@"hh\:mm\:ss")}");
+    }
     
     var timingState = new TimingState();
     timingState.Apply(allDeltas.Where(d => d.SessionTime <= TimeSpan.Zero));
 
-    var carSamples = SampleWindow.Within(
-        CarDataFile.Read(Path.Combine(folder, "CarData.z.jsonStream"), sessionClock),
-        TimeSpan.Zero, TimeSpan.FromMinutes(minutes)).ToList();
-    var positionSamples = SampleWindow.Within(
-        PositionDataFile.Read(Path.Combine(folder, "Position.z.jsonStream"), sessionClock),
-        TimeSpan.Zero, TimeSpan.FromMinutes(minutes)).ToList();
+    var carSamples = new List<ChannelSample>();
+    var positionSamples = new List<PositionSample>();
+    if (!timingOnly)
+    {
+        carSamples = SampleWindow.Within(
+            CarDataFile.Read(Path.Combine(folder, "CarData.z.jsonStream"), sessionClock),
+            TimeSpan.Zero, TimeSpan.FromMinutes(minutes)).ToList();
+        positionSamples = SampleWindow.Within(
+            PositionDataFile.Read(Path.Combine(folder, "Position.z.jsonStream"), sessionClock),
+            TimeSpan.Zero, TimeSpan.FromMinutes(minutes)).ToList();
+    }
 
-
-    var replayClock = new ReplayClock(start: TimeSpan.Zero, end: TimeSpan.FromMinutes(minutes))
+    var replayClock = new ReplayClock(
+        start: TimeSpan.Zero,
+        end: TimeSpan.FromMinutes(minutes),
+        stoppages: stoppages,
+        hold: TimeSpan.FromSeconds(3))
     {
         Speed = speed
     };
@@ -44,12 +60,24 @@ if (mode == "replay")
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
     var nextPrint = TimeSpan.Zero;
+    var wasHolding = false;
 
     try
     {
         await foreach (var batch in replayEngine.RunAsync(TimeSpan.FromMilliseconds(100), cts.Token))
         {
             timingState.Apply(batch.Deltas);
+            
+            if (replayClock.IsHolding && !wasHolding)
+            {
+                Console.WriteLine($"*** RED FLAG at {batch.To.ToString(@"hh\:mm\:ss")} ***");
+            }
+            
+            if (replayClock.LastAdvanceSkipped)
+            {
+                Console.WriteLine($"*** RESTART: skipped to {batch.To.ToString(@"hh\:mm\:ss")} ***");
+            }
+            wasHolding = replayClock.IsHolding;
 
             if (batch.To >= nextPrint)
             {
@@ -63,7 +91,7 @@ if (mode == "replay")
                 Console.WriteLine($"t = {batch.To.ToString(@"hh\:mm\:ss\.f")}   " +
                             $"channels: {batch.Channels.Count,5}   positions: {batch.Positions.Count,4}\n");
 
-                nextPrint += TimeSpan.FromSeconds(10);
+                nextPrint = batch.To + TimeSpan.FromSeconds(10);
             }
         }
     }

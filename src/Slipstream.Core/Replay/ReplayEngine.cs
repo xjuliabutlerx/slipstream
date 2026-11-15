@@ -12,8 +12,12 @@ public sealed class ReplayEngine(
     public ReplayBatch Tick(TimeSpan realElapsed)
     {
         var (from, to) = clock.Advance(realElapsed);
-        var channelList = ReplaySlice.Between(channels, from, to);
-        var positionList = ReplaySlice.Between(positions, from, to);
+        IReadOnlyList<ChannelSample> channelList = clock.LastAdvanceSkipped
+            ? Array.Empty<ChannelSample>()
+            : ReplaySlice.Between(channels, from, to);
+        IReadOnlyList<PositionSample> positionList = clock.LastAdvanceSkipped
+            ? Array.Empty<PositionSample>()
+            : ReplaySlice.Between(positions, from, to);
         var deltasList = ReplaySlice.Between(deltas ?? Array.Empty<TimedDelta>(), from, to);
         return new ReplayBatch(from, to, channelList, positionList, deltasList);
     }

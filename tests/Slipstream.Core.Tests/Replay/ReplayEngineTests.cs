@@ -163,4 +163,33 @@ public class ReplayEngineTests
 
         Assert.Empty(engine.Tick(S(1)).Deltas);
     }
+
+    private static ReplayClock ClockWithStoppage()
+    {
+        // speed 1, playhead at 90, stoppage 100..400, no hold (skips on the tick after reaching it)
+        var clock = new ReplayClock(start: S(90),
+            stoppages: new[] { new RedFlagPeriod(S(100), S(400)) }, hold: TimeSpan.Zero);
+        clock.Play();
+        return clock;
+    }
+
+    [Fact]
+    public void Tick_Skip_DropsSamples_KeepsDeltas_AndResumesAfter()
+    {
+        var channels = new[] { ChannelAt(95), ChannelAt(150), ChannelAt(250), ChannelAt(405) };
+        var positions = new[] { PositionAt(150), PositionAt(405) };
+        var deltas = new[] { DeltaAt(150), DeltaAt(250), DeltaAt(405) };
+        var engine = new ReplayEngine(ClockWithStoppage(), channels, positions, deltas: deltas);
+
+        engine.Tick(S(20));                 // 90 -> 100, reaches the stoppage
+        var skip = engine.Tick(S(1));       // no hold: jumps (100, 400]
+
+        Assert.Empty(skip.Channels);        // samples during the stoppage are not emitted
+        Assert.Empty(skip.Positions);
+        Assert.Equal(new[] { S(150), S(250) }, skip.Deltas.Select(d => d.SessionTime));   // but timing is applied
+
+        var next = engine.Tick(S(10));      // normal again: (400, 410]
+        Assert.Equal(new[] { S(405) }, next.Channels.Select(c => c.SessionTime));
+        Assert.Single(next.Positions);
+    }
 }

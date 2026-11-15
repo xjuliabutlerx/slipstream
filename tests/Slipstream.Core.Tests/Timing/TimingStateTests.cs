@@ -107,5 +107,42 @@ public class TimingStateTests
     {
         var timingState = new TimingState();
         Assert.Empty(timingState.Leaderboard());
-    }    
+    }
+
+    [Fact]
+    public void At_AppliesDeltasUpToAndIncludingT()
+    {
+        var deltas = new[]
+        {
+            Delta("DriverList", TwoDrivers, 0),
+            Delta("TimingData", FirstTiming, 10),
+            Delta("TimingData", SwapPositions, 20),
+        };
+
+        Assert.Equal(new[] { "1", "2" }, TimingState.At(deltas, TimeSpan.FromSeconds(15)).Leaderboard().Select(r => r.Car));
+        Assert.Equal(new[] { "2", "1" }, TimingState.At(deltas, TimeSpan.FromSeconds(20)).Leaderboard().Select(r => r.Car));
+    }
+
+    [Fact]
+    public void At_BeforeFirstDelta_IsEmpty()
+    {
+        var deltas = new[] { Delta("DriverList", TwoDrivers, 10), Delta("TimingData", FirstTiming, 10) };
+        Assert.Empty(TimingState.At(deltas, TimeSpan.FromSeconds(5)).Leaderboard());
+    }
+
+    [Fact]
+    public void At_CalledTwice_GivesIndependentStates()
+    {
+        var deltas = new[]
+        {
+            Delta("DriverList", TwoDrivers, 0),
+            Delta("TimingData", FirstTiming, 10),
+            Delta("TimingData", SwapPositions, 20),
+        };
+        var early = TimingState.At(deltas, TimeSpan.FromSeconds(15));
+        var late = TimingState.At(deltas, TimeSpan.FromSeconds(25));
+
+        Assert.Equal(new[] { "1", "2" }, early.Leaderboard().Select(r => r.Car));   // not changed by building `late`
+        Assert.Equal(new[] { "2", "1" }, late.Leaderboard().Select(r => r.Car));
+    }
 }

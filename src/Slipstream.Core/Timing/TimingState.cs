@@ -21,4 +21,11 @@ public sealed class TimingState
 
         return Slipstream.Core.Leaderboard.From(timingData, driverList);
     }
+
+    public static TimingState At(IReadOnlyList<TimedDelta> sortedDeltas, TimeSpan t)
+    {
+        var state = new TimingState();
+        state.Apply(ReplaySlice.Between(sortedDeltas, TimeSpan.MinValue, t));
+        return state;
+    }
 }
